@@ -1,0 +1,16 @@
+{
+  "name": "Shakestweete",
+  "description": "Shakespearean plays generated from tweets.",
+  "author": "Juhana Leinonen <shakestweete@nitku.net>",
+  "version": "0.0.1",
+  "license": "MIT",
+  "dependencies": {},
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/juhana/shakestweete.git"
+  },
+  "engine": "node >= 0.6.6",
+  "devDependencies": {
+    "twit": "~1.1.11"
+  }
+}
