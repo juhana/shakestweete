@@ -4,13 +4,13 @@
   "author": "Juhana Leinonen <shakestweete@nitku.net>",
   "version": "0.0.1",
   "license": "MIT",
-  "dependencies": {},
+  "dependencies": {
+    "twit": "~1.1.11",
+    "underscore": "~1.5.2"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/juhana/shakestweete.git"
   },
-  "engine": "node >= 0.6.6",
-  "devDependencies": {
-    "twit": "~1.1.11"
-  }
+  "engine": "node >= 0.6.6"
 }
