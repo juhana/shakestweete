@@ -5,7 +5,8 @@ var fs = require( 'fs' ),
 var twitter,
     stats = {
         requests: 0
-    };
+    },
+    actors = [];
 
 var titles = [
     "All's Well That Tweets Well",
@@ -48,13 +49,14 @@ fs.readFile( 'credentials.json', 'utf8', function( error, data ) {
                 throw new Error( error );
             }
 
-            var tweet;
+            var tweet, chosenData;
 
             // choose the first tweet that fits the bill
-            _.find( reply.statuses, function( data ) {
-                tweet = validateAndClean( data );
-
-                return tweet;
+            _.each( reply.statuses, function( data ) {
+                if( !tweet ) {
+                    tweet = validateAndClean( data );
+                    chosenData = data;
+                }
             });
 
             if( !tweet ) {
@@ -62,15 +64,80 @@ fs.readFile( 'credentials.json', 'utf8', function( error, data ) {
                 return;
             }
 
-            console.dir( tweet );
+            addActor( tweet.username );
+            setActorInfo( chosenData.user );
+
+            // Pull 200 tweets from the user and validate them
+            getTweets( tweet.username, main )
         }
     );
 });
 
 
 /**
- * Check that the tweet is suitable for our purposes and clean it up,
- * except removing the @s
+ * The main loop that collects the text
+ * 
+ * @param newTweets
+ */
+function main( newTweets ) {
+
+}
+
+
+/**
+ * Add an actor to the actor list and make sure it's unique
+ *
+ * @param actor string
+ */
+function addActor( actor ) {
+    // if the actor is already seen, do nothing
+    if( _.contains( actors, actor ) || _.where( actors, { name: actor } ).length ) {
+        return;
+    }
+
+    actors.push( actor );
+}
+
+
+/**
+ * Get a user's latest tweets.
+ *
+ * @param actor
+ * @param callback function A callback function called after the request is done.
+ *  The AJAX response object is given as
+ */
+function getTweets( actor, callback ) {
+    twitter.get(
+        'statuses/user_timeline',
+        { screen_name: actor, count: 200 },
+        function( error, reply ) {
+            stats.requests++;
+            if( error ) {
+                throw new Error( error );
+            }
+
+            callback( reply );
+        }
+    );
+}
+
+
+function setActorInfo( user ) {
+    console.log( 'Actors: ' );
+    console.log( actors );
+    var index = _.indexOf( actors, user.screen_name );
+
+    if( index === -1 ) {
+        // we assume the actor exists in the array as a string
+        throw new Error( 'Actor not found in setActorInfo()' );
+    }
+
+    actors[ index ] = user;
+}
+
+
+/**
+ * Check that the tweet is suitable for our purposes and clean it up
  *
  * @param tweet
  * @return boolean|object false if unsuitable tweet, a clean tweet object
@@ -101,14 +168,22 @@ function validateAndClean( tweet ) {
 
     // try to clean up the username
     actor = actor
-        .replace( /_/g, '' )
+        .replace( /_/g, ' ' )
         .replace( /\w+/g, function( txt ){
             return txt.charAt( 0 ).toUpperCase() + txt.substr( 1 ).toLowerCase();
-        });
+        })
+        .replace( /([a-z])([A-Z])/, '$1 $2' );
 
     // reject if doesn't look like a name
-    if( !/^[a-z\-0-9 .]+$/i.test( actor ) ) {
+    if( !/^([A-Z][a-z\-. ]+)+$/.test( tweet.user.name ) ) {
         return false;
+    }
+
+    // find new actors
+    var at;
+    while( at = /@[a-z0-9_]+/i.exec( text ) ) {
+        addActor( at[ 0 ].substr( 1 ) );
+        text = text.replace( /@[a-z0-9_]+/i, 'fff' );
     }
 
     return {
