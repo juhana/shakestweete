@@ -2,11 +2,15 @@ var fs = require( 'fs' ),
     Twit = require( 'twit' ),
     _ = require( 'underscore' )._;
 
-var twitter,
+var actors = [],
+    minWords = 50000,
+    script = [],
     stats = {
-        requests: 0
+        requests: 0,
+        tweets: 0,
+        words: 0
     },
-    actors = [];
+    twitter;
 
 var titles = [
     "All's Well That Tweets Well",
@@ -64,11 +68,11 @@ fs.readFile( 'credentials.json', 'utf8', function( error, data ) {
                 return;
             }
 
-            addActor( tweet.username );
+            addActor( tweet.actor );
             setActorInfo( chosenData.user );
 
             // Pull 200 tweets from the user and validate them
-            getTweets( tweet.username, main )
+            getTweets( tweet.actor, main )
         }
     );
 });
@@ -80,7 +84,10 @@ fs.readFile( 'credentials.json', 'utf8', function( error, data ) {
  * @param newTweets
  */
 function main( newTweets ) {
-
+    _.each( newTweets, function( tweet ) {
+        script.push( tweet );
+        stats.words += countWords( tweet.text );
+    });
 }
 
 
@@ -96,6 +103,11 @@ function addActor( actor ) {
     }
 
     actors.push( actor );
+}
+
+
+function countWords( text ) {
+    return text.split( ' ' ).length;
 }
 
 
@@ -116,15 +128,25 @@ function getTweets( actor, callback ) {
                 throw new Error( error );
             }
 
-            callback( reply );
+            var result = [];
+
+            // process replies
+            _.each( reply, function( tweet ) {
+                var clean = validateAndClean( tweet );
+
+                if( clean ) {
+                    result.push( clean );
+                }
+            });
+
+            // return tweets in reversed chronological order
+            callback( result.reverse() );
         }
     );
 }
 
 
 function setActorInfo( user ) {
-    console.log( 'Actors: ' );
-    console.log( actors );
     var index = _.indexOf( actors, user.screen_name );
 
     if( index === -1 ) {
@@ -144,12 +166,7 @@ function setActorInfo( user ) {
  */
 function validateAndClean( tweet ) {
     // reject users who don't tweet in English
-    if( tweet.user.lang !== 'en' ) {
-        return false;
-    }
-
-    // reject manual retweets
-    if( /\bRT\b/.test( tweet ) ) {
+    if( tweet.user.lang !== 'en' || tweet.lang !== 'en' ) {
         return false;
     }
 
@@ -161,8 +178,19 @@ function validateAndClean( tweet ) {
         return false;
     }
 
+    // reject urls
+    if( text.indexOf( 'http' ) > -1 ) {
+        return false;
+    }
+
+    // Reword retweets
+    text = text.replace( /^rt /i, 'Thus spoke ' );
+
     // Add a comma after the first @
     text = text.replace( /^(@[a-z_0-9]+) /i, '$1, ' );
+
+    // remove double-spaces and line breaks
+    text = text.replace( /(\n? +)|\n/g, ' ' );
 
     var actor = tweet.user.name;
 
@@ -175,21 +203,21 @@ function validateAndClean( tweet ) {
         .replace( /([a-z])([A-Z])/, '$1 $2' );
 
     // reject if doesn't look like a name
-    if( !/^([A-Z][a-z\-. ]+)+$/.test( tweet.user.name ) ) {
+    if( !/^([A-Z][a-z\-. ]+)+$/.test( actor ) ) {
         return false;
     }
 
     // find new actors
-    var at;
-    while( at = /@[a-z0-9_]+/i.exec( text ) ) {
+    var at,
+        atRegex = /@[a-z0-9_]+/gi;
+
+    while( ( at = atRegex.exec( text ) ) !== null ) {
         addActor( at[ 0 ].substr( 1 ) );
-        text = text.replace( /@[a-z0-9_]+/i, 'fff' );
     }
 
     return {
+        actor: tweet.user.screen_name,
         text: text,
-        username: tweet.user.screen_name,
-        actor: actor,
-        location: tweet.user.location
+        timestamp: new Date( tweet.created_at )
     };
 }
