@@ -88,6 +88,20 @@ function main( newTweets ) {
         script.push( tweet );
         stats.words += countWords( tweet.text );
     });
+
+    if( stats.words >= minWords ) {
+
+    }
+
+    getNextActor( function( nextActor ) {
+        if( nextActor === undefined ) {
+            throw new Error( "Didn't find enough actors to generate " + minWords + " words, stopping at " + stats.words + " words." );
+        }
+
+        nextActor.appeared = true;
+
+        getTweets( nextActor, main );
+    });
 }
 
 
@@ -106,8 +120,38 @@ function addActor( actor ) {
 }
 
 
+/**
+ * Count words of a string
+ *
+ * @param text
+ * @returns {Number}
+ */
 function countWords( text ) {
     return text.split( ' ' ).length;
+}
+
+
+/**
+ * Fetch more specific user data from Twitter
+ */
+function fetchActorData() {
+
+}
+
+
+function getNextActor( callback ) {
+    var index = _.find( actors, function( data ) {
+        return typeof data === 'string' || data.appeared === false;
+    });
+
+    // if the actor is a string, process the actors to turn it into an object
+    if( typeof actors[ index ] === 'string' ) {
+        fetchActorData();
+        getNextActor( callback );
+        return;
+    }
+
+    callback( actors[ index ].screen_name );
 }
 
 
