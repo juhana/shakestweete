@@ -36,6 +36,10 @@ var titles = [
     "%USER% IV, Part II"
 ];
 
+function progress( text ) {
+    console.error( text );
+}
+
 fs.readFile( 'credentials.json', 'utf8', function( error, data ) {
     if( error ) {
         console.error( error + '\nSee README.md for instructions.' );
@@ -44,37 +48,47 @@ fs.readFile( 'credentials.json', 'utf8', function( error, data ) {
 
     twitter = new Twit( JSON.parse( data ) );
 
-    twitter.get(
-        'search/tweets',
-        { q: 'alas -filter:links', lang: 'en', count: 10 },
-        function( error, reply ) {
-            stats.requests++;
-            if( error ) {
-                throw new Error( error );
-            }
+    if( process.argv.length > 2 ) {
+        // if the seed actor was given in the command line
+        addActor( process.argv[ 2 ] );
 
-            var tweet, chosenData;
-
-            // choose the first tweet that fits the bill
-            _.each( reply.statuses, function( data ) {
-                if( !tweet ) {
-                    tweet = validateAndClean( data );
-                    chosenData = data;
+        fetchActorData( function() { actors[ 0 ].appeared = true; getTweets( process.argv[ 2 ], main ) } );
+    }
+    else {
+        twitter.get(
+            'search/tweets',
+            { q: 'alas -filter:links', lang: 'en', count: 10 },
+            function( error, reply ) {
+                stats.requests++;
+                if( error ) {
+                    throw new Error( error );
                 }
-            });
 
-            if( !tweet ) {
-                console.error( "Suitable seed tweet wasn't found, please try again in a while." );
-                return;
+                var tweet, chosenData;
+
+                // choose the first tweet that fits the bill
+                _.each( reply.statuses, function( data ) {
+                    if( !tweet ) {
+                        tweet = validateAndClean( data );
+                        chosenData = data;
+                    }
+                });
+
+                if( !tweet ) {
+                    console.error( "Suitable seed tweet wasn't found, please try again in a while." );
+                    return;
+                }
+
+                addActor( tweet.actor );
+                setActorInfo( chosenData.user );
+                chosenData.user.appeared = true;
+
+                progress( 'Seed actor is ' + chosenData.user.screen_name + '.' );
+                // Pull 200 tweets from the user and validate them
+                getTweets( tweet.actor, main )
             }
-
-            addActor( tweet.actor );
-            setActorInfo( chosenData.user );
-
-            // Pull 200 tweets from the user and validate them
-            getTweets( tweet.actor, main )
-        }
-    );
+        );
+    }
 });
 
 
@@ -89,16 +103,16 @@ function main( newTweets ) {
         stats.words += countWords( tweet.text );
     });
 
+    progress( 'At ' + stats.words + ' words (' + ( minWords - stats.words ) + ' remaining).' );
     if( stats.words >= minWords ) {
-
+        printPlay();
+        return;
     }
 
     getNextActor( function( nextActor ) {
         if( nextActor === undefined ) {
             throw new Error( "Didn't find enough actors to generate " + minWords + " words, stopping at " + stats.words + " words." );
         }
-
-        nextActor.appeared = true;
 
         getTweets( nextActor, main );
     });
@@ -112,7 +126,7 @@ function main( newTweets ) {
  */
 function addActor( actor ) {
     // if the actor is already seen, do nothing
-    if( _.contains( actors, actor ) || _.where( actors, { name: actor } ).length ) {
+    if( _.contains( actors, actor ) || _.where( actors, { screen_name: actor } ).length ) {
         return;
     }
 
@@ -132,26 +146,66 @@ function countWords( text ) {
 
 
 /**
- * Fetch more specific user data from Twitter
+ * Fetch more specific user data from Twitter.
  */
-function fetchActorData() {
-
-}
-
-
-function getNextActor( callback ) {
-    var index = _.find( actors, function( data ) {
-        return typeof data === 'string' || data.appeared === false;
+function fetchActorData( callback ) {
+    progress( 'Retrieving user data...' );
+    var unknownActors = _.filter( actors, function( data ) {
+        return typeof data === 'string';
     });
 
+    if( unknownActors.length === 0 ) {
+        callback( false );
+    }
+
+    // Twitter has limit of 100 users per request
+    if( unknownActors.length > 100 ) {
+        unknownActors = unknownActors.slice( 0, 100 );
+    }
+
+    twitter.get(
+        'users/lookup',
+        { screen_name: unknownActors.join(',') },
+        function( error, reply ) {
+            stats.requests++;
+            if( error ) {
+                throw new Error( error );
+            }
+
+            _.each( reply, function( data ) {
+                setActorInfo( data );
+            });
+
+            progress( reply.length + ' users found.' );
+
+            callback( true );
+        }
+    );
+}
+
+function getActorName( screen_name ) {
+    return _.findWhere( actors, { screen_name: screen_name } ).name;
+}
+
+function getNextActor( callback ) {
+    var actor = _.find( actors, function( data ) {
+        return typeof data === 'string' || ( data.appeared === false && data.valid === true );
+    });
+
+    if( actor === -1 ) {
+        throw new Error( "Didn't find enough actors to generate " + minWords + " words, stopping at " + stats.words + " words." );
+    }
+
     // if the actor is a string, process the actors to turn it into an object
-    if( typeof actors[ index ] === 'string' ) {
-        fetchActorData();
-        getNextActor( callback );
+    if( typeof actor === 'string' ) {
+        fetchActorData( function() { getNextActor( callback ); } );
         return;
     }
 
-    callback( actors[ index ].screen_name );
+    progress( 'Next actor is ' + actor.screen_name + '.' );
+    actor.appeared = true;
+
+    callback( actor.screen_name );
 }
 
 
@@ -163,6 +217,7 @@ function getNextActor( callback ) {
  *  The AJAX response object is given as
  */
 function getTweets( actor, callback ) {
+    progress( 'Retrieving tweets for ' + actor + '...' );
     twitter.get(
         'statuses/user_timeline',
         { screen_name: actor, count: 200 },
@@ -183,6 +238,8 @@ function getTweets( actor, callback ) {
                 }
             });
 
+            progress( result.length + ' tweets found.' );
+
             // return tweets in reversed chronological order
             callback( result.reverse() );
         }
@@ -190,15 +247,57 @@ function getTweets( actor, callback ) {
 }
 
 
+function printPlay() {
+    script = _.sortBy( script, 'timestamp' );
+    var previous_actor = null;
+    _.each( script, function( line ) {
+        if( previous_actor !== line.actor ) {
+            previous_actor = line.actor;
+            process.stdout.write( '\n' + getActorName( line.actor ).toUpperCase() + ': ' );
+        }
+        else {
+            process.stdout.write( '  ' );
+        }
+
+        process.stdout.write( line.text + '\n' );
+    });
+}
+
 function setActorInfo( user ) {
     var index = _.indexOf( actors, user.screen_name );
 
     if( index === -1 ) {
-        // we assume the actor exists in the array as a string
-        throw new Error( 'Actor not found in setActorInfo()' );
+        console.error( user.screen_name + ' not found in array' );
+        return;
     }
 
     actors[ index ] = user;
+
+    user.appeared = false;
+
+    // discard protected users
+    if( user.protected ) {
+        user.valid = false;
+        return false;
+    }
+
+    // try to clean up the username
+    var name = user.screen_name
+        .replace( /_/g, ' ' )
+        .replace( /\w+/g, function( txt ){
+            return txt.charAt( 0 ).toUpperCase() + txt.substr( 1 ).toLowerCase();
+        })
+        .replace( /([a-z])([A-Z])/, '$1 $2' );
+
+    // reject if doesn't look like a name
+    if( !/^([A-Z][a-z\-. ]+)+$/.test( name ) ) {
+        user.valid = false;
+        return false;
+    }
+
+    user.valid = true;
+
+    return true;
 }
 
 
@@ -227,29 +326,20 @@ function validateAndClean( tweet ) {
         return false;
     }
 
+    /*
     // Reword retweets
     text = text.replace( /^rt /i, 'Thus spoke ' );
+    */
+    // Reject retweets (there's just too many of them)
+    if( text.indexOf( 'RT ' ) === 0 || text.indexOf( 'rt ' ) === 0 ) {
+        return false;
+    }
 
     // Add a comma after the first @
     text = text.replace( /^(@[a-z_0-9]+) /i, '$1, ' );
 
     // remove double-spaces and line breaks
     text = text.replace( /(\n? +)|\n/g, ' ' );
-
-    var actor = tweet.user.name;
-
-    // try to clean up the username
-    actor = actor
-        .replace( /_/g, ' ' )
-        .replace( /\w+/g, function( txt ){
-            return txt.charAt( 0 ).toUpperCase() + txt.substr( 1 ).toLowerCase();
-        })
-        .replace( /([a-z])([A-Z])/, '$1 $2' );
-
-    // reject if doesn't look like a name
-    if( !/^([A-Z][a-z\-. ]+)+$/.test( actor ) ) {
-        return false;
-    }
 
     // find new actors
     var at,
