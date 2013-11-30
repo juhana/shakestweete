@@ -12,30 +12,6 @@ var actors = [],
     },
     twitter;
 
-var titles = [
-    "All's Well That Tweets Well",
-    "As You Tweet It",
-    "The Comedy of Twitter",
-    "Love's Labour's Tweet",
-    "Tweet for Tweet",
-    "The Merchant of Twitter",
-    "The Merry Wives of Twitter",
-    "A Midsummer Night's Tweet",
-    "Much Ado About Twitter",
-    "The Tweeting of the Shrew",
-    "The Tweet",
-    "Twelfth Tweet",
-    "The Two Gentlemen of Twitter",
-    "The Two Noble Tweeters",
-    "The Winter's Tweet",
-    "%USER% and %USER%",
-    "%USER% of Twitter",
-    "The Tragedy of %USER%, Prince of Twitter",
-    "King %USER%",
-    "%USER% IV, Part I",
-    "%USER% IV, Part II"
-];
-
 function progress( text ) {
     console.error( text );
 }
@@ -105,7 +81,7 @@ function main( newTweets ) {
 
     progress( 'At ' + stats.words + ' words (' + ( minWords - stats.words ) + ' remaining).' );
     if( stats.words >= minWords ) {
-        printPlay();
+        processUsernames( printPlay, true );
         return;
     }
 
@@ -159,9 +135,11 @@ function fetchActorData( callback ) {
     }
 
     // Twitter has limit of 100 users per request
+
     if( unknownActors.length > 100 ) {
-        unknownActors = unknownActors.slice( 0, 100 );
+        unknownActors = unknownActors.slice( -100 );
     }
+
 
     twitter.get(
         'users/lookup',
@@ -172,19 +150,24 @@ function fetchActorData( callback ) {
                 throw new Error( error );
             }
 
+            var ok = false;
+
             _.each( reply, function( data ) {
-                setActorInfo( data );
+                if( setActorInfo( data ) ) {
+                    ok = true;
+                }
             });
 
             progress( reply.length + ' users found.' );
 
-            callback( true );
+            callback( ok );
         }
     );
 }
 
 function getActorName( screen_name ) {
-    return _.findWhere( actors, { screen_name: screen_name } ).name;
+    var name = _.findWhere( actors, { screen_name: screen_name } );
+    return name ? name : false;
 }
 
 function getNextActor( callback ) {
@@ -198,7 +181,14 @@ function getNextActor( callback ) {
 
     // if the actor is a string, process the actors to turn it into an object
     if( typeof actor === 'string' ) {
-        fetchActorData( function() { getNextActor( callback ); } );
+        fetchActorData( function( ok ) {
+            if( ok ) {
+                getNextActor( callback );
+            }
+            else {
+                throw new Error( 'Only string user data found' );
+            }
+        } );
         return;
     }
 
@@ -249,11 +239,41 @@ function getTweets( actor, callback ) {
 
 function printPlay() {
     script = _.sortBy( script, 'timestamp' );
-    var previous_actor = null;
+    var previous_actor = null,
+        actor_name;
+
+
+    var titles = [
+        "All's Well That Tweets Well",
+        "As You Tweet It",
+        "The Comedy of Twitter",
+        "Love's Labour's Tweet",
+        "Tweet for Tweet",
+        "The Merchant of Twitter",
+        "The Merry Wives of Twitter",
+        "A Midsummer Night's Tweet",
+        "Much Ado About Twitter",
+        "The Tweeting of the Shrew",
+        "The Tweet",
+        "Twelfth Tweet",
+        "The Two Gentlemen of Twitter",
+        "The Two Noble Tweeters",
+        "The Winter's Tweet"
+    ];
+
+    var title = titles[ Math.floor( Math.random() * titles.length ) ];
+
+
+    process.stdout.write( '\n\n        ' + title.toUpperCase() );
+    process.stdout.write( '\n\n        A tragedy in one act\n\n\n\n' );
+
     _.each( script, function( line ) {
         if( previous_actor !== line.actor ) {
             previous_actor = line.actor;
-            process.stdout.write( '\n' + getActorName( line.actor ).toUpperCase() + ': ' );
+            actor_name = getActorName( line.actor );
+            if( typeof actor_name.name === 'string' ) {
+                process.stdout.write( '\n' + actor_name.name.toUpperCase() + ': ' );
+            }
         }
         else {
             process.stdout.write( '  ' );
@@ -263,12 +283,48 @@ function printPlay() {
     });
 }
 
+function processUsernames( callback, firstRun, oldActorCount, oldNewActors ) {
+    var clear = true,
+        actorCount = 0,
+        newActors = 0;
+
+    _.each( script, function( line ) {
+        var regex = /@[a-z0-9_]+/gi,
+            result,
+            actor;
+
+        while( result = regex.exec( line.text ) ) {
+            result = result[ 0 ];
+            actor = getActorName( result.substr( 1 ) );
+
+            if( actor ) {
+                line.text = line.text.replace( result, actor.name );
+                actorCount++;
+            }
+            else {
+                addActor( result.substr( 1 ) );
+                clear = false;
+                newActors++;
+            }
+        }
+    });
+
+    progress( "Changed the names of " + actorCount + " actors and found " + newActors + " new" );
+
+    if( clear || ( !firstRun && actorCount === 0 ) || ( actorCount === oldActorCount && newActors == oldNewActors ) ) {
+        callback();
+    }
+    else {
+        fetchActorData( function() { processUsernames( callback, false, actorCount, newActors ); } );
+    }
+}
+
 function setActorInfo( user ) {
     var index = _.indexOf( actors, user.screen_name );
 
     if( index === -1 ) {
         console.error( user.screen_name + ' not found in array' );
-        return;
+        return false;
     }
 
     actors[ index ] = user;
